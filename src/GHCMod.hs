@@ -4,14 +4,14 @@ module Main where
 
 import Config (cProjectVersion)
 import Control.Applicative ((<$>))
-import Control.Exception (Exception, Handler(..), ErrorCall(..))
+import Control.Exception (Handler(..), ErrorCall(..))
 import CoreMonad (liftIO)
 import qualified Control.Exception as E
-import Data.Typeable (Typeable)
 import Data.Version (showVersion)
 import Language.Haskell.GhcMod
 import Paths_ghc_mod
-import System.Console.GetOpt (OptDescr(..), ArgDescr(..), ArgOrder(..))
+import CmdParsing
+import System.Console.GetOpt (OptDescr(..))
 import qualified System.Console.GetOpt as O
 import System.Directory (doesFileExist)
 import System.Environment (getArgs)
@@ -56,47 +56,15 @@ usage =    progVersion
 ----------------------------------------------------------------
 
 argspec :: [OptDescr (Options -> Options)]
-argspec = [ Option "l" ["tolisp"]
-            (NoArg (\opts -> opts { outputStyle = LispStyle }))
-            "print as a list of Lisp"
-          , Option "h" ["hlintOpt"]
-            (ReqArg (\h opts -> opts { hlintOpts = h : hlintOpts opts }) "hlintOpt")
-            "hlint options"
-          , Option "g" ["ghcOpt"]
-            (ReqArg (\g opts -> opts { ghcUserOptions = g : ghcUserOptions opts }) "ghcOpt")
-            "GHC options"
-          , Option "v" ["verbose"]
-            (NoArg (\opts -> opts { ghcUserOptions = "-v" : ghcUserOptions opts }))
-            "verbose"
-          , Option "o" ["operators"]
-            (NoArg (\opts -> opts { operators = True }))
-            "print operators, too"
-          , Option "d" ["detailed"]
-            (NoArg (\opts -> opts { detailed = True }))
-            "print detailed info"
-          , Option "q" ["qualified"]
-            (NoArg (\opts -> opts { qualified = True }))
-            "show qualified names"
-          , Option "b" ["boundary"]
-            (ReqArg (\s opts -> opts { lineSeparator = LineSeparator s }) "sep")
-            "specify line separator (default is Nul string)"
-          ]
-
-parseArgs :: [OptDescr (Options -> Options)] -> [String] -> (Options, [String])
-parseArgs spec argv
-    = case O.getOpt Permute spec argv of
-        (o,n,[]  ) -> (foldr id defaultOptions o, n)
-        (_,_,errs) -> E.throw (CmdArg errs)
-
-----------------------------------------------------------------
-
-data GHCModError = SafeList
-                 | ArgumentsMismatch String
-                 | NoSuchCommand String
-                 | CmdArg [String]
-                 | FileNotExist String deriving (Show, Typeable)
-
-instance Exception GHCModError
+argspec = 
+    [ optToLisp
+    , optHlintOpt
+    , optGhcOpt
+    , optVerbose
+    , optOperators
+    , optDetailed
+    , optQualified
+    , optBoundary ]
 
 ----------------------------------------------------------------
 
@@ -152,7 +120,7 @@ main = flip E.catches handlers $ do
     handleThenExit handler e = handler e >> exitFailure
     handler1 :: ErrorCall -> IO ()
     handler1 = print -- for debug
-    handler2 :: GHCModError -> IO ()
+    handler2 :: CommandError -> IO ()
     handler2 SafeList = printUsage
     handler2 (ArgumentsMismatch cmd) = do
         hPutStrLn stderr $ "\"" ++ cmd ++ "\": Arguments did not match"
