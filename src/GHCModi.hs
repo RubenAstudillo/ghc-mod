@@ -21,7 +21,7 @@ module Main where
 import Config (cProjectVersion)
 import Control.Applicative ((<$>))
 import Control.Concurrent (forkIO, MVar, newEmptyMVar, putMVar, readMVar)
-import Control.Exception (SomeException(..), Exception)
+import Control.Exception (SomeException(..))
 import qualified Control.Exception as E
 import Control.Monad (when, void)
 import CoreMonad (liftIO)
@@ -30,10 +30,10 @@ import Data.List.Split (splitOn)
 import Data.Maybe (fromMaybe)
 import Data.Set (Set)
 import qualified Data.Set as S
-import Data.Typeable (Typeable)
 import Data.Version (showVersion)
 import qualified GHC as G
 import Language.Haskell.GhcMod
+import CmdParsing
 import Paths_ghc_mod
 import System.Console.GetOpt
 import System.Directory (setCurrentDirectory)
@@ -53,15 +53,7 @@ progVersion :: String
 progVersion = "ghc-modi version " ++ showVersion version ++ " compiled by GHC " ++ cProjectVersion ++ "\n"
 
 argspec :: [OptDescr (Options -> Options)]
-argspec = [ Option "b" ["boundary"]
-            (ReqArg (\s opts -> opts { lineSeparator = LineSeparator s }) "sep")
-            "specify line separator (default is Nul string)"
-          , Option "l" ["tolisp"]
-            (NoArg (\opts -> opts { outputStyle = LispStyle }))
-            "print as a list of Lisp"
-          , Option "g" []
-            (ReqArg (\s opts -> opts { ghcUserOptions = s : ghcUserOptions opts }) "flag") "specify a ghc flag"
-          ]
+argspec = [ optBoundary , optToLisp , optGhcOpt ]
 
 usage :: String
 usage =    progVersion
@@ -69,19 +61,6 @@ usage =    progVersion
         ++ "\t ghc-modi [-l] [-b sep] [-g flag]\n"
         ++ "\t ghc-modi version\n"
         ++ "\t ghc-modi help\n"
-
-parseArgs :: [OptDescr (Options -> Options)] -> [String] -> (Options, [String])
-parseArgs spec argv
-    = case getOpt Permute spec argv of
-        (o,n,[]  ) -> (foldr id defaultOptions o, n)
-        (_,_,errs) -> E.throw (CmdArg errs)
-
-----------------------------------------------------------------
-
-data GHCModiError = CmdArg [String]
-                  deriving (Show, Typeable)
-
-instance Exception GHCModiError
 
 ----------------------------------------------------------------
 
@@ -92,7 +71,8 @@ main :: IO ()
 main = E.handle cmdHandler $
     go =<< parseArgs argspec <$> getArgs
   where
-    cmdHandler (CmdArg _) = putStr $ usageInfo usage argspec
+    cmdHandler :: CommandError -> IO ()
+    cmdHandler _ = putStr $ usageInfo usage argspec
     go (_,"help":_) = putStr $ usageInfo usage argspec
     go (_,"version":_) = putStr progVersion
     go (opt,_) = flip E.catches handlers $ do
@@ -112,7 +92,8 @@ main = E.handle cmdHandler $
           Left e -> bug $ show e
       where
         -- this is just in case.
-        -- If an error is caught here, it is a bug of GhcMod library.
+        -- If an error is caught here, it is a malformed command or is a bug of
+        -- GhcMod library.
         handlers = [ E.Handler (\(_ :: ExitCode) -> return ())
                    , E.Handler (\(SomeException e) -> bug $ show e) ]
 
@@ -166,10 +147,12 @@ loop set mvar = do
     when ok $ loop set' mvar
 
 ----------------------------------------------------------------
+-- From here on, all the functions of loop do their own arg parsing.
+----------------------------------------------------------------
 
 checkStx :: IOish m
          => Set FilePath
-         -> FilePath
+         -> String -- Hopefully a single FilePath
          -> GhcModT m (String, Bool, Set FilePath)
 checkStx set file = do
     set' <- newFileSet set file
@@ -313,14 +296,10 @@ bootIt set = do
 
 browseIt :: IOish m
          => Set FilePath
-         -> ModuleString
+         -> String
          -> GhcModT m (String, Bool, Set FilePath)
-browseIt set mdl = do
-    let (det,rest') = break (== ' ') mdl
-        rest = dropWhile (== ' ') rest'
-    ret <- if det == "-d"
-               then withOptions setDetailed (browse rest)
-               else browse mdl
+browseIt set str = do
+    let browseOpt = [optToLisp, optOperators, optDetailed, optQualified]
+        (opt, file:_) = parseArgs browseOpt (words str)
+    ret <- withOptions (const opt) (browse file)
     return (ret, True, set)
-  where
-    setDetailed opt = opt { detailed = True } 
