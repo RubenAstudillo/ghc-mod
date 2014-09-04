@@ -20,10 +20,10 @@ module Main where
 
 import Config (cProjectVersion)
 import Control.Applicative ((<$>))
-import Control.Concurrent (forkIO, MVar, newEmptyMVar, putMVar, readMVar)
-import Control.Exception (SomeException(..))
+import Control.Concurrent.Async (Async, async, wait)
+import Control.Exception (SomeException(..), Exception)
 import qualified Control.Exception as E
-import Control.Monad (when, void)
+import Control.Monad (when)
 import CoreMonad (liftIO)
 import Data.List (find, intercalate)
 import Data.List.Split (splitOn)
@@ -33,7 +33,7 @@ import qualified Data.Set as S
 import Data.Version (showVersion)
 import qualified GHC as G
 import Language.Haskell.GhcMod
-import CmdParsing
+import Language.Haskell.GhcMod.Internal
 import Paths_ghc_mod
 import System.Console.GetOpt
 import System.Directory (setCurrentDirectory)
@@ -80,14 +80,13 @@ main = E.handle cmdHandler $
         let rootdir = cradleRootDir cradle0
 --            c = cradle0 { cradleCurrentDir = rootdir } TODO: ?????
         setCurrentDirectory rootdir
-        mvar <- liftIO newEmptyMVar
-        void $ forkIO $ setupDB mvar
-        (res, _) <- runGhcModT opt $ loop S.empty mvar
+        symDb <- async $ runGhcModT opt loadSymbolDb
+        (res, _) <- runGhcModT opt $ loop S.empty symDb
 
         case res of
           Right () -> return ()
           Left (GMECabalConfigure msg) -> do
-              putStrLn $ notGood $ "cabal configure failed: " ++ msg
+              putStrLn $ notGood $ "cabal configure failed: " ++ show msg
               exitFailure
           Left e -> bug $ show e
       where
@@ -113,19 +112,14 @@ replace needle replacement = intercalate replacement . splitOn needle
 
 ----------------------------------------------------------------
 
-setupDB :: MVar SymbolDb -> IO ()
-setupDB mvar = loadSymbolDb >>= putMVar mvar
-
-----------------------------------------------------------------
-
-loop :: IOish m => Set FilePath -> MVar SymbolDb -> GhcModT m ()
-loop set mvar = do
+loop :: IOish m => Set FilePath -> SymDbReq -> GhcModT m ()
+loop set symDbReq = do
     cmdArg <- liftIO getLine
     let (cmd,arg') = break (== ' ') cmdArg
         arg = dropWhile (== ' ') arg'
     (ret,ok,set') <- case cmd of
         "check"  -> checkStx set arg
-        "find"   -> findSym set arg mvar
+        "find"   -> findSym set arg symDbReq
         "lint"   -> lintStx set arg
         "info"   -> showInfo set arg
         "type"   -> showType set arg
@@ -144,7 +138,7 @@ loop set mvar = do
       else do
         liftIO $ putStrLn $ notGood ret
     liftIO $ hFlush stdout
-    when ok $ loop set' mvar
+    when ok $ loop set' symDbReq
 
 ----------------------------------------------------------------
 -- From here on, all the functions of loop do their own arg parsing.
@@ -190,10 +184,12 @@ isSameMainFile file (Just x)
 
 ----------------------------------------------------------------
 
-findSym :: IOish m => Set FilePath -> String -> MVar SymbolDb
+type SymDbReq = Async (Either GhcModError SymbolDb, GhcModLog)
+
+findSym :: IOish m => Set FilePath -> String -> SymDbReq
         -> GhcModT m (String, Bool, Set FilePath)
-findSym set sym mvar = do
-    db <- liftIO $ readMVar mvar
+findSym set sym dbReq = do
+    db <- hoistGhcModT =<< liftIO (wait dbReq)
     ret <- lookupSymbol sym db
     return (ret, True, set)
 
