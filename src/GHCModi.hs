@@ -42,6 +42,7 @@ import System.IO (hFlush,stdout)
 import System.Exit (ExitCode, exitFailure)
 
 import Utils
+import CmdParsing
 
 ----------------------------------------------------------------
 
