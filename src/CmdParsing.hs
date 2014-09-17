@@ -1,6 +1,17 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 
-module CmdParsing where
+module CmdParsing (
+    parseArgs
+  , CommandError (..)
+  , optToLisp
+  , optHlintOpt
+  , optGhcOpt
+  , optVerbose
+  , optOperators
+  , optDetailed
+  , optQualified
+  , optBoundary
+  ) where
 
 import Language.Haskell.GhcMod
 import Control.Exception
@@ -25,42 +36,43 @@ instance Exception CommandError
 
 ----------------------------------------------------------------
 
+option :: String -> [String] -> String -> ArgDescr a -> OptDescr a
+option s l udsc dsc = Option s l dsc udsc
+
+reqArg :: String -> (String -> a) -> ArgDescr a
+reqArg udsc dsc = ReqArg dsc udsc
+
+----------------------------------------------------------------
+
 optToLisp :: OptDescr (Options -> Options)
-optToLisp = Option "l" ["tolisp"]
-    (NoArg (\opts -> opts { outputStyle = LispStyle }))
-    "print as a list of Lisp"
+optToLisp = option "l" ["tolisp"] "print as a list of Lisp" $
+               NoArg $ \o -> o { outputStyle = LispStyle }
 
 optHlintOpt :: OptDescr (Options -> Options)
-optHlintOpt = Option "h" ["hlintOpt"]
-    (ReqArg (\h opts -> opts { hlintOpts = h : hlintOpts opts }) "hlintOpt")
-    "hlint options"
+optHlintOpt = option "h" ["hlintOpt"] "hlint options" $
+                reqArg "hlintOpt" $ \h o -> o { hlintOpts = h : hlintOpts o }
 
 optGhcOpt :: OptDescr (Options -> Options)
-optGhcOpt = Option "g" ["ghcOpt"]
-    (ReqArg (\g opts -> opts { ghcUserOptions = g : ghcUserOptions opts }) "ghcOpt")
-    "GHC options"
+optGhcOpt = option "g" ["ghcOpt"] "GHC options" $
+               reqArg "ghcOpt" $ \g o ->
+                   o { ghcUserOptions = g : ghcUserOptions o }
 
 optVerbose :: OptDescr (Options -> Options)
-optVerbose = Option "v" ["verbose"]
-    (NoArg (\opts -> opts { ghcUserOptions = "-v" : ghcUserOptions opts }))
-    "verbose"
+optVerbose = option "v" ["verbose"] "verbose" $
+               NoArg $ \o -> o { ghcUserOptions = "-v" : ghcUserOptions o }
 
 optOperators :: OptDescr (Options -> Options)
-optOperators = Option "o" ["operators"]
-    (NoArg (\opts -> opts { operators = True }))
-    "print operators, too"
+optOperators = option "o" ["operators"] "print operators, too" $
+                 NoArg $ \o -> o { operators = True }
 
 optDetailed :: OptDescr (Options -> Options)
-optDetailed = Option "d" ["detailed"]
-    (NoArg (\opts -> opts { detailed = True }))
-    "print detailed info"
+optDetailed = option "d" ["detailed"] "print detailed info" $
+               NoArg $ \o -> o { detailed = True }
 
 optQualified :: OptDescr (Options -> Options)
-optQualified = Option "q" ["qualified"]
-    (NoArg (\opts -> opts { qualified = True }))
-    "show qualified names"
+optQualified = option "q" ["qualified"] "show qualified names" $
+                 NoArg $ \o -> o { qualified = True }
 
 optBoundary :: OptDescr (Options -> Options)
-optBoundary = Option "b" ["boundary"]
-    (ReqArg (\s opts -> opts { lineSeparator = LineSeparator s }) "sep")
-    "specify line separator (default is Nul string)"
+optBoundary = option "b" ["boundary"] "specify line separator (default is Nul string)" $
+                reqArg "sep" $ \s o -> o { lineSeparator = LineSeparator s }

@@ -5,6 +5,7 @@
 module Language.Haskell.GhcMod.CabalConfig (
     CabalConfig
   , cabalConfigDependencies
+  , cabalConfigFlags
   ) where
 
 import Language.Haskell.GhcMod.Error
@@ -15,6 +16,7 @@ import Language.Haskell.GhcMod.Types
 
 import qualified Language.Haskell.GhcMod.Cabal16 as C16
 import qualified Language.Haskell.GhcMod.Cabal18 as C18
+import qualified Language.Haskell.GhcMod.Cabal21 as C21
 
 #ifndef MIN_VERSION_mtl
 #define MIN_VERSION_mtl(x,y,z) 1
@@ -31,7 +33,9 @@ import Data.Maybe ()
 import Data.Set ()
 import Data.List (find,tails,isPrefixOf,isInfixOf,nub,stripPrefix)
 import Distribution.Package (InstalledPackageId(..)
-                           , PackageIdentifier)
+                           , PackageIdentifier(..)
+                           , PackageName(..))
+import Distribution.PackageDescription (FlagAssignment)
 import Distribution.Simple.BuildPaths (defaultDistPref)
 import Distribution.Simple.Configure (localBuildInfoFile)
 import Distribution.Simple.LocalBuildInfo (ComponentName)
@@ -77,7 +81,7 @@ configDependencies :: PackageIdentifier -> CabalConfig -> [Package]
 configDependencies thisPkg config = map fromInstalledPackageId deps
  where
     deps :: [InstalledPackageId]
-    deps = case deps18 `mplus` deps16 of
+    deps = case deps21 `mplus` deps18 `mplus` deps16 of
         Right ps -> ps
         Left msg -> error msg
 
@@ -85,7 +89,27 @@ configDependencies thisPkg config = map fromInstalledPackageId deps
     -- defined in the same package).
     internal pkgid = pkgid == thisPkg
 
-    -- Cabal >= 1.18
+    -- Cabal >= 1.21
+    deps21 :: Either String [InstalledPackageId]
+    deps21 =
+        map fst
+      <$> filterInternal21
+      <$> (readEither =<< extractField config "componentsConfigs")
+
+    filterInternal21
+        :: [(ComponentName, C21.ComponentLocalBuildInfo, [ComponentName])]
+        -> [(InstalledPackageId, C21.PackageIdentifier)]
+
+    filterInternal21 ccfg = [ (ipkgid, pkgid)
+                          | (_,clbi,_)      <- ccfg
+                          , (ipkgid, pkgid) <- C21.componentPackageDeps clbi
+                          , not (internal . packageIdentifierFrom21 $ pkgid) ]
+
+    packageIdentifierFrom21 :: C21.PackageIdentifier -> PackageIdentifier
+    packageIdentifierFrom21 (C21.PackageIdentifier (C21.PackageName myName) myVersion) =
+        PackageIdentifier (PackageName myName) myVersion
+
+    -- Cabal >= 1.18 && < 1.21
     deps18 :: Either String [InstalledPackageId]
     deps18 =
           map fst
@@ -129,6 +153,20 @@ configDependencies thisPkg config = map fromInstalledPackageId deps
        readConfigs f s = case readEither s of
            Right x -> x
            Left msg -> error $ "reading config " ++ f ++ " failed ("++msg++")"
+
+-- | Get the flag assignment from the local build info of the given cradle
+cabalConfigFlags :: (IOish m, MonadError GhcModError m)
+                 => Cradle
+                 -> m FlagAssignment
+cabalConfigFlags cradle = do
+  config <- getConfig cradle
+  case configFlags config of
+    Right x  -> return x
+    Left msg -> throwError (GMECabalFlags (GMEString msg))
+
+-- | Extract the cabal flags from the 'CabalConfig'
+configFlags :: CabalConfig -> Either String FlagAssignment
+configFlags config = readEither =<< flip extractField "configConfigurationsFlags" =<< extractField config "configFlags"
 
 -- | Find @field@ in 'CabalConfig'. Returns 'Left' containing a user readable
 -- error message with lots of context on failure.

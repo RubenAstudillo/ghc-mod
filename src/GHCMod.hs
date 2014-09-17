@@ -29,23 +29,23 @@ ghcOptHelp = " [-g GHC_opt1 -g GHC_opt2 ...] "
 usage :: String
 usage =    progVersion
         ++ "Usage:\n"
-        ++ "\t ghc-mod list" ++ ghcOptHelp ++ "[-l] [-d]\n"
-        ++ "\t ghc-mod lang [-l]\n"
-        ++ "\t ghc-mod flag [-l]\n"
-        ++ "\t ghc-mod browse" ++ ghcOptHelp ++ "[-l] [-o] [-d] [-q] [<package>:]<module> [[<package>:]<module> ...]\n"
-        ++ "\t ghc-mod check" ++ ghcOptHelp ++ "<HaskellFiles...>\n"
-        ++ "\t ghc-mod expand" ++ ghcOptHelp ++ "<HaskellFiles...>\n"
-        ++ "\t ghc-mod debug" ++ ghcOptHelp ++ "\n"
-        ++ "\t ghc-mod info" ++ ghcOptHelp ++ "<HaskellFile> <module> <expression>\n"
-        ++ "\t ghc-mod type" ++ ghcOptHelp ++ "<HaskellFile> <module> <line-no> <column-no>\n"
-        ++ "\t ghc-mod split" ++ ghcOptHelp ++ "<HaskellFile> <module> <line-no> <column-no>\n"
-        ++ "\t ghc-mod sig" ++ ghcOptHelp ++ "<HaskellFile> <module> <line-no> <column-no>\n"
-        ++ "\t ghc-mod refine" ++ ghcOptHelp ++ "<HaskellFile> <module> <line-no> <column-no> <expression>\n"
-        ++ "\t ghc-mod auto" ++ ghcOptHelp ++ "<HaskellFile> <module> <line-no> <column-no>\n"
-        ++ "\t ghc-mod find <symbol>\n"
-        ++ "\t ghc-mod lint [-h opt] <HaskellFile>\n"
+        ++ "\t ghc-mod list   " ++ ghcOptHelp ++ "[-l] [-d]\n"
+        ++ "\t ghc-mod lang    [-l]\n"
+        ++ "\t ghc-mod flag    [-l]\n"
+        ++ "\t ghc-mod browse " ++ ghcOptHelp ++ "[-l] [-o] [-d] [-q] [<package>:]<module> [[<package>:]<module> ...]\n"
+        ++ "\t ghc-mod check  " ++ ghcOptHelp ++ "<HaskellFiles...>\n"
+        ++ "\t ghc-mod expand " ++ ghcOptHelp ++ "<HaskellFiles...>\n"
+        ++ "\t ghc-mod debug  " ++ ghcOptHelp ++ "\n"
+        ++ "\t ghc-mod info   " ++ ghcOptHelp ++ "<HaskellFile> <module> <expression>\n"
+        ++ "\t ghc-mod type   " ++ ghcOptHelp ++ "<HaskellFile> <module> <line-no> <column-no>\n"
+        ++ "\t ghc-mod split  " ++ ghcOptHelp ++ "<HaskellFile> <module> <line-no> <column-no>\n"
+        ++ "\t ghc-mod sig    " ++ ghcOptHelp ++ "<HaskellFile> <module> <line-no> <column-no>\n"
+        ++ "\t ghc-mod refine " ++ ghcOptHelp ++ "<HaskellFile> <module> <line-no> <column-no> <expression>\n"
+        ++ "\t ghc-mod auto   " ++ ghcOptHelp ++ "<HaskellFile> <module> <line-no> <column-no>\n"
+        ++ "\t ghc-mod find    <symbol>\n"
+        ++ "\t ghc-mod lint    [-h opt] <HaskellFile>\n"
         ++ "\t ghc-mod root\n"
-        ++ "\t ghc-mod doc <module>\n"
+        ++ "\t ghc-mod doc     <module>\n"
         ++ "\t ghc-mod boot\n"
         ++ "\t ghc-mod version\n"
         ++ "\t ghc-mod help\n"
@@ -66,13 +66,28 @@ argspec =
     , optQualified
     , optBoundary ]
 
+parseArgs :: [OptDescr (Options -> Options)] -> [String] -> (Options, [String])
+parseArgs spec argv
+    = case O.getOpt Permute spec argv of
+        (o,n,[]  ) -> (foldr id defaultOptions o, n)
+        (_,_,errs) -> E.throw (CmdArg errs)
+
+----------------------------------------------------------------
+
+data GHCModError = SafeList
+                 | ArgumentsMismatch String
+                 | NoSuchCommand String
+                 | CmdArg [String]
+                 | FileNotExist String deriving (Show, Typeable)
+
+instance Exception GHCModError
+>>>>>>> master
+
 ----------------------------------------------------------------
 
 main :: IO ()
 main = flip E.catches handlers $ do
--- #if __GLASGOW_HASKELL__ >= 611
     hSetEncoding stdout utf8
--- #endif
     args <- getArgs
     let (opt,cmdArg) = parseArgs argspec args
     let cmdArg0 = cmdArg !. 0
@@ -117,6 +132,8 @@ main = flip E.catches handlers $ do
           hPutStrLn stderr msg
       Left (GMECabalConfigure msg) ->
           hPutStrLn stderr $ "cabal configure failed: " ++ show msg
+      Left (GMECabalFlags msg) ->
+          hPutStrLn stderr $ "retrieval of the cabal configuration flags failed: " ++ show msg
       Left (GMEProcess cmd msg) ->
           hPutStrLn stderr $
             "launching operating system process `"++c++"` failed: " ++ show msg
